@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Character, FallingItem } from '../types';
-import { FOOD_ITEMS, BOMB_ITEM, SPAWN_RATE_MS, PLAYER_SIZE, ITEM_SIZE } from '../constants';
-import { Pause, RotateCcw } from 'lucide-react';
+import { FOOD_ITEMS, BOMB_ITEM, SPAWN_RATE_MS, PLAYER_SIZE, ITEM_SIZE, MAX_LIVES } from '../constants';
+import { Pause, RotateCcw, Heart } from 'lucide-react';
 
 interface Props {
   character: Character;
@@ -11,22 +11,95 @@ interface Props {
 
 export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
   const [score, setScore] = useState(0);
+  const [lives, setLives] = useState(MAX_LIVES);
   const [items, setItems] = useState<FallingItem[]>([]);
   const [playerX, setPlayerX] = useState(50); // Percentage 0-100
   const [isPaused, setIsPaused] = useState(false);
   const [isChomping, setIsChomping] = useState(false);
+  const [isHurt, setIsHurt] = useState(false);
   
   // Refs for game loop state to avoid closure staleness
   const playerXRef = useRef(50);
   const itemsRef = useRef<FallingItem[]>([]);
   const scoreRef = useRef(0);
+  const livesRef = useRef(MAX_LIVES);
   const requestRef = useRef<number>(0);
   const lastSpawnTime = useRef<number>(0);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
   
+  // Audio Context Ref for synthesized sounds
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Initialize Audio Context on mount/interaction
+  useEffect(() => {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      audioCtxRef.current = new AudioContextClass();
+    }
+    return () => {
+      audioCtxRef.current?.close();
+    };
+  }, []);
+
+  const playEatSound = useCallback(() => {
+    // 1. Voice for Pikachu
+    if (character.id === 'pikachu') {
+      window.speechSynthesis.cancel(); // Stop previous overlap
+      const utterance = new SpeechSynthesisUtterance("Pika Pika!");
+      utterance.pitch = 1.4; // Make it sound cute
+      utterance.rate = 1.3;
+      utterance.volume = 0.8;
+      window.speechSynthesis.speak(utterance);
+    } 
+    
+    // 2. Synthesized Chime/Bloop for everyone (or specifically others)
+    if (audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.type = 'sine';
+      // Simple "coin" like sound: high pitch slide
+      oscillator.frequency.setValueAtTime(800, ctx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.1);
+    }
+  }, [character.id]);
+
+  const playHurtSound = useCallback(() => {
+    if (audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(150, ctx.currentTime);
+      oscillator.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.2);
+    }
+  }, []);
+
   // Movement Logic
   const movePlayer = useCallback((direction: 'left' | 'right') => {
+    const currentSize = scoreRef.current >= 10 ? PLAYER_SIZE * 1.3 : PLAYER_SIZE;
     const speed = 1.5; // Movement speed per frame (percentage)
+    
     setPlayerX((prev) => {
       let next = prev;
       if (direction === 'left') next -= speed;
@@ -34,7 +107,7 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
       
       // Clamp
       if (next < 0) next = 0;
-      if (next > 100 - PLAYER_SIZE) next = 100 - PLAYER_SIZE;
+      if (next > 100 - currentSize) next = 100 - currentSize;
       
       playerXRef.current = next;
       return next;
@@ -81,10 +154,14 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
     }
 
     // 3. Update Items & Check Collisions
+    
+    // Dynamic Player Size based on Score
+    const currentSize = scoreRef.current >= 10 ? PLAYER_SIZE * 1.3 : PLAYER_SIZE;
+
     const playerRect = {
       x: playerXRef.current,
       y: 80, // Player image top is roughly at 80% (since bottom is 15% and height is variable)
-      width: PLAYER_SIZE,
+      width: currentSize,
       height: 15,
     };
 
@@ -111,13 +188,22 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
 
       if (isColliding) {
         if (item.type === 'bomb') {
-          // Game Over logic triggers immediately
-          onGameOver(scoreRef.current);
-          return false; 
+          // Bomb Hit Logic
+          playHurtSound();
+          livesRef.current -= 1;
+          setLives(livesRef.current);
+          setIsHurt(true);
+          setTimeout(() => setIsHurt(false), 400); // Visual shake feedback
+
+          if (livesRef.current <= 0) {
+            onGameOver(scoreRef.current);
+          }
+          return false; // Remove bomb immediately
         } else {
-          // Score up
+          // Food Hit Logic
           scoreRef.current += 1;
           setScore(scoreRef.current);
+          playEatSound();
           return false; // Remove item
         }
       }
@@ -130,7 +216,7 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
     setItems([...itemsRef.current]);
 
     requestRef.current = requestAnimationFrame(animate);
-  }, [isPaused, movePlayer, onGameOver]);
+  }, [isPaused, movePlayer, onGameOver, playEatSound, playHurtSound]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
@@ -154,6 +240,9 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
     setTouchInterval(null);
   };
 
+  // Determine current display size (for React render)
+  const currentRenderSize = score >= 10 ? PLAYER_SIZE * 1.3 : PLAYER_SIZE;
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-sky-200 select-none">
       {/* Background Decor */}
@@ -169,14 +258,27 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
         </button>
       </div>
 
-      <div className="absolute top-4 right-4 z-20">
+      <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+         {/* Lives Display */}
+        <div className="flex gap-1">
+          {[...Array(MAX_LIVES)].map((_, i) => (
+             <Heart 
+              key={i} 
+              size={24} 
+              className={`${i < lives ? 'fill-red-500 text-red-600' : 'fill-gray-300 text-gray-400'} drop-shadow-md transition-colors duration-300`} 
+            />
+          ))}
+        </div>
         <div className="bg-white/90 backdrop-blur px-6 py-2 rounded-full shadow-lg border-2 border-orange-400">
           <span className="text-orange-600 font-black text-2xl">Score: {score}</span>
         </div>
       </div>
 
       {/* Game Area */}
-      <div className="relative w-full h-full max-w-md mx-auto bg-gradient-to-b from-sky-200 to-sky-100 shadow-2xl overflow-hidden border-x-4 border-white/50">
+      <div className={`
+          relative w-full h-full max-w-md mx-auto bg-gradient-to-b from-sky-200 to-sky-100 shadow-2xl overflow-hidden border-x-4 border-white/50
+          ${isHurt ? 'animate-shake bg-red-100' : ''}
+      `}>
         
         {/* Falling Items */}
         {items.map(item => (
@@ -195,10 +297,10 @@ export const Game: React.FC<Props> = ({ character, onGameOver, onBack }) => {
 
         {/* Player Character */}
         <div
-          className="absolute bottom-[13%] transition-none will-change-transform flex flex-col items-center z-20"
+          className="absolute bottom-[13%] transition-all duration-300 ease-out flex flex-col items-center z-20"
           style={{
             left: `${playerX}%`,
-            width: `${PLAYER_SIZE}%`,
+            width: `${currentRenderSize}%`, // Use dynamic size
           }}
         >
            {/* Image container with bounce/chomp animations */}

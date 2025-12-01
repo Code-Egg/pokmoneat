@@ -2,9 +2,10 @@ import { Character } from './types';
 
 export const GAME_WIDTH = 100; // Percentage
 export const GAME_HEIGHT = 100; // Percentage
-export const PLAYER_SIZE = 18; // Increased slightly for images
+export const PLAYER_SIZE = 18; // Base size
 export const ITEM_SIZE = 10; // Percentage width
 export const SPAWN_RATE_MS = 600;
+export const MAX_LIVES = 3;
 
 export const CHARACTERS: Character[] = [
   {
