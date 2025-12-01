@@ -1,29 +1,29 @@
-import { GoogleGenAI } from "@google/genai";
 import { Character } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+// Replaced AI generation with local logic to run without API Key
 export const generateTrainerFeedback = async (character: Character, score: number): Promise<string> => {
-  try {
-    const prompt = `
-      You are a Pokémon Trainer evaluating a mini-game performance.
-      The Pokémon "${character.name}" just finished an eating contest.
-      They scored ${score} points (1 point per food item) before hitting a bomb.
-      
-      Write a short, witty, and encouraging 1-sentence comment about their performance.
-      Mention the specific Pokémon name.
-      If the score is low (< 5), be sympathetic but funny.
-      If the score is high (> 20), be amazed.
-    `;
+  // Simulate a brief "thinking" delay for the UI effect
+  await new Promise(resolve => setTimeout(resolve, 600));
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    return response.text.trim();
-  } catch (error) {
-    console.error("Error generating feedback:", error);
-    return `Great job training with ${character.name}! Try again to beat your high score!`;
+  if (score === 0) {
+    return `Oh no! ${character.name} didn't get to eat anything. Watch out for those bombs!`;
   }
+  
+  if (score <= 5) {
+    return `${character.name} had a light snack. Good warm-up, but I know you can eat more!`;
+  }
+  
+  if (score <= 15) {
+    return `Tasty! ${character.name} is feeling good. That was a solid meal!`;
+  }
+  
+  if (score <= 30) {
+    return `Wow! ${character.name} has a serious appetite today! Great reflexes!`;
+  }
+  
+  if (score <= 50) {
+    return `Incredible! ${character.name} is basically a vacuum cleaner! Amazing score!`;
+  }
+  
+  return `Legendary! You and ${character.name} are the ultimate eating champions! Unbeatable!`;
 };
